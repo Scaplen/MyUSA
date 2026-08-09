@@ -1,0 +1,57 @@
+name: Bootstrap MyUSA YouTube Auth Helper
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: myusa-youtube-auth-helper-bootstrap
+  cancel-in-progress: true
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: optimum-sound-505003-d3
+          workload_identity_provider: projects/265519813462/locations/global/workloadIdentityPools/myusa-github/providers/github
+          service_account: myusa-github-deployer@optimum-sound-505003-d3.iam.gserviceaccount.com
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Deploy callback bootstrap
+        run: |
+          gcloud run deploy myusa-youtube-auth \
+            --project=optimum-sound-505003-d3 \
+            --source=youtube_auth_helper \
+            --region=us-east1 \
+            --service-account=myusa-youtube-publisher@optimum-sound-505003-d3.iam.gserviceaccount.com \
+            --allow-unauthenticated \
+            --ingress=all \
+            --execution-environment=gen2 \
+            --cpu=1 \
+            --memory=256Mi \
+            --min=0 \
+            --max=1 \
+            --port=8080 \
+            --set-env-vars='MYUSA_YOUTUBE_HANDLE=@MyUSAus,YOUTUBE_REFRESH_SECRET_ID=myusa-youtube-refresh-token' \
+            --set-secrets='MYUSA_YOUTUBE_SETUP_KEY=myusa-youtube-setup-key:latest,MYUSA_YOUTUBE_STATE_SECRET=myusa-youtube-state-secret:latest' \
+            --quiet
+
+      - name: Show exact Web OAuth redirect URI
+        run: |
+          URL="$(gcloud run services describe myusa-youtube-auth --project=optimum-sound-505003-d3 --region=us-east1 --format='value(status.url)')"
+          echo "Authorization helper: ${URL}"
+          echo "Create the Google OAuth Web application with this exact Authorized redirect URI:"
+          echo "${URL}/oauth2/callback"
