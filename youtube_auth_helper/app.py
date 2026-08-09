@@ -149,5 +149,7 @@ def callback():
     ), 200
 
 
+# Redeploy marker: refresh latest Web OAuth client secret from Secret Manager.
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
