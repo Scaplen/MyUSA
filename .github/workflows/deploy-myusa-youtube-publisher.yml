@@ -1,0 +1,57 @@
+name: Deploy MyUSA YouTube Publisher
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: myusa-youtube-publisher-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: optimum-sound-505003-d3
+          workload_identity_provider: projects/265519813462/locations/global/workloadIdentityPools/myusa-github/providers/github
+          service_account: myusa-github-deployer@optimum-sound-505003-d3.iam.gserviceaccount.com
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Deploy private scale-to-zero publisher
+        run: |
+          gcloud run deploy myusa-youtube-publisher \
+            --project=optimum-sound-505003-d3 \
+            --source=youtube_connector \
+            --region=us-east1 \
+            --service-account=myusa-youtube-publisher@optimum-sound-505003-d3.iam.gserviceaccount.com \
+            --no-allow-unauthenticated \
+            --ingress=all \
+            --execution-environment=gen2 \
+            --cpu=1 \
+            --memory=512Mi \
+            --min=0 \
+            --max=1 \
+            --port=8080 \
+            --set-env-vars='MYUSA_YOUTUBE_BUCKET=myusa-youtube-staging-265519813462,MYUSA_YOUTUBE_CATEGORY_ID=28,MYUSA_YOUTUBE_ALLOW_PUBLIC=false' \
+            --set-secrets='YOUTUBE_CLIENT_ID=myusa-youtube-client-id:latest,YOUTUBE_CLIENT_SECRET=myusa-youtube-client-secret:latest,YOUTUBE_REFRESH_TOKEN=myusa-youtube-refresh-token:latest' \
+            --quiet
+
+      - name: Show private MCP endpoint
+        run: |
+          URL="$(gcloud run services describe myusa-youtube-publisher --project=optimum-sound-505003-d3 --region=us-east1 --format='value(status.url)')"
+          echo "Cloud Run URL: ${URL}"
+          echo "MCP endpoint: ${URL}/mcp"
+          echo "Public publishing remains disabled by MYUSA_YOUTUBE_ALLOW_PUBLIC=false."
