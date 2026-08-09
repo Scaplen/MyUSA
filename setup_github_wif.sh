@@ -54,9 +54,15 @@ gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
   --quiet >/dev/null
 
 # Cloud Run source builds use the Compute Engine default service account unless overridden.
+# The build account needs Cloud Run Builder, and the GitHub deployer must be allowed to act as it.
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${BUILD_SA}" \
   --role="roles/run.builder" \
+  --quiet >/dev/null
+
+gcloud iam service-accounts add-iam-policy-binding "$BUILD_SA" \
+  --member="serviceAccount:${DEPLOYER_SA}" \
+  --role="roles/iam.serviceAccountUser" \
   --quiet >/dev/null
 
 # Create the Workload Identity pool if needed.
