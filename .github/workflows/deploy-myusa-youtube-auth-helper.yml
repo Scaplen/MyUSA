@@ -41,7 +41,7 @@ jobs:
             --ingress=all \
             --execution-environment=gen2 \
             --cpu=1 \
-            --memory=256Mi \
+            --memory=512Mi \
             --min=0 \
             --max=1 \
             --port=8080 \
