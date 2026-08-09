@@ -26,6 +26,19 @@ if ! gcloud iam service-accounts describe "$DEPLOYER_SA" >/dev/null 2>&1; then
     --display-name="MyUSA GitHub Cloud Run Deployer"
 fi
 
+# Newly created service accounts can take a short time to become usable by IAM APIs.
+echo "Waiting for deployer service account to propagate..."
+for i in {1..24}; do
+  if gcloud iam service-accounts describe "$DEPLOYER_SA" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 5
+  if [ "$i" -eq 24 ]; then
+    echo "Service account did not become available in time." >&2
+    exit 1
+  fi
+done
+
 # Minimum documented project roles for source deployment.
 for ROLE in roles/run.sourceDeveloper roles/serviceusage.serviceUsageConsumer; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
