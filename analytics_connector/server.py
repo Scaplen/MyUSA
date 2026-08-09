@@ -27,7 +27,14 @@ PORT = int(os.getenv("PORT", "8080"))
 MYUSA_HOSTS = {"myusa.us", "www.myusa.us"}
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly"]
 
-mcp = FastMCP("MyUSA Google Growth Stack")
+# In MCP Python SDK v1.x, HTTP bind settings belong on FastMCP settings.
+# Cloud Run requires listening on 0.0.0.0:$PORT.
+mcp = FastMCP(
+    "MyUSA Google Growth Stack",
+    host="0.0.0.0",
+    port=PORT,
+    streamable_http_path="/mcp",
+)
 data_client = BetaAnalyticsDataClient()
 admin_client = AnalyticsAdminServiceClient()
 credentials, _ = google.auth.default(scopes=GOOGLE_SCOPES)
@@ -319,9 +326,4 @@ def get_crux(url: str = "https://myusa.us/") -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    mcp.run(
-        transport="streamable-http",
-        host="0.0.0.0",
-        port=PORT,
-        streamable_http_path="/mcp",
-    )
+    mcp.run(transport="streamable-http")
