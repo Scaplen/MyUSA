@@ -6,9 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MYUSA_GA4_PROPERTY_ID=527458725
 
 WORKDIR /app
-COPY analytics_connector/requirements.txt ./requirements.txt
+COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
-COPY analytics_connector/server.py ./server.py
+COPY server.py ./server.py
 
 EXPOSE 8080
 CMD ["python", "server.py"]
