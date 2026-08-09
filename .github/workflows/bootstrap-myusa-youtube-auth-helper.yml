@@ -1,13 +1,10 @@
 name: Bootstrap MyUSA YouTube Auth Helper
 
+# Bootstrap is intentionally manual-only. Once OAuth credentials exist, normal
+# auth-helper code changes must be deployed by deploy-myusa-youtube-auth-helper.yml
+# so the required OAuth client ID/secret bindings are never removed.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/youtube-publisher
-    paths:
-      - 'youtube_auth_helper/**'
-      - '.github/workflows/bootstrap-myusa-youtube-auth-helper.yml'
 
 permissions:
   contents: read
