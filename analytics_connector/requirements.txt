@@ -1,0 +1,4 @@
+mcp>=1.13,<2
+google-analytics-data>=0.23,<0.24
+google-analytics-admin>=0.30,<0.31
+google-auth>=2.40,<3
