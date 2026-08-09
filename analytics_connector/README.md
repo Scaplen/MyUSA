@@ -6,6 +6,7 @@ This connector gives ChatGPT read-only access to the MyUSA.us Google Analytics 4
 - MCP endpoint after deployment: `/mcp`
 - Intended permissions: Analytics Viewer/read-only only
 - Credentials are supplied by Google Cloud at runtime and are never committed to GitHub.
+- Deployment is automated through GitHub Actions using Google Workload Identity Federation; no service-account key is stored in GitHub.
 
 ## What it exposes
 
