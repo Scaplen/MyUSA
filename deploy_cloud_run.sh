@@ -21,6 +21,25 @@ gcloud services enable \
   chromeuxreport.googleapis.com \
   serviceusage.googleapis.com
 
+# New Google Cloud projects may use the Compute Engine default service account
+# for Cloud Build without legacy broad permissions. Cloud Run source deploys
+# require the build identity to have roles/run.builder.
+BUILD_SERVICE_ACCOUNT="$(gcloud builds get-default-service-account --project "$PROJECT_ID" --format='value(serviceAccountEmail)' 2>/dev/null || true)"
+if [[ -z "$BUILD_SERVICE_ACCOUNT" ]]; then
+  PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+  BUILD_SERVICE_ACCOUNT="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+fi
+
+echo "Cloud Build service account: $BUILD_SERVICE_ACCOUNT"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$BUILD_SERVICE_ACCOUNT" \
+  --role="roles/run.builder" \
+  --condition=None \
+  --quiet >/dev/null
+
+echo "Granted Cloud Run Builder to the build identity. Waiting briefly for IAM propagation..."
+sleep 20
+
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
