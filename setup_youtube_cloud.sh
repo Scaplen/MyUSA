@@ -12,6 +12,8 @@ SECRETS=(
   myusa-youtube-client-id
   myusa-youtube-client-secret
   myusa-youtube-refresh-token
+  myusa-youtube-setup-key
+  myusa-youtube-state-secret
 )
 
 gcloud config set project "$PROJECT_ID"
@@ -51,8 +53,6 @@ gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
   --role="roles/storage.objectViewer" \
   --quiet >/dev/null
 
-# Delete staging uploads after two days. Cloud Storage soft-delete behavior may retain
-# deleted objects according to the bucket's soft-delete policy; review it in Cloud Console.
 LIFECYCLE_FILE="$(mktemp)"
 cat > "$LIFECYCLE_FILE" <<'JSON'
 {
@@ -77,13 +77,28 @@ for SECRET in "${SECRETS[@]}"; do
     --quiet >/dev/null
 done
 
+# The auth helper is the only runtime component allowed to add a refresh-token version.
+gcloud secrets add-iam-policy-binding myusa-youtube-refresh-token \
+  --member="serviceAccount:${YOUTUBE_SA}" \
+  --role="roles/secretmanager.secretVersionAdder" \
+  --quiet >/dev/null
+
+# Create strong one-time helper secrets if they do not yet have a version.
+if ! gcloud secrets versions list myusa-youtube-setup-key --filter='state=ENABLED' --format='value(name)' | grep -q .; then
+  python3 -c 'import secrets; print(secrets.token_urlsafe(32))' | \
+    gcloud secrets versions add myusa-youtube-setup-key --data-file=- >/dev/null
+fi
+if ! gcloud secrets versions list myusa-youtube-state-secret --filter='state=ENABLED' --format='value(name)' | grep -q .; then
+  python3 -c 'import secrets; print(secrets.token_urlsafe(48))' | \
+    gcloud secrets versions add myusa-youtube-state-secret --data-file=- >/dev/null
+fi
+
 echo ""
 echo "MyUSA YouTube Cloud resources are ready."
 echo "Runtime service account: ${YOUTUBE_SA}"
 echo "Private staging bucket: gs://${BUCKET}"
-echo "Secrets created (values are NOT set by this script):"
+echo "Secrets ready:"
 printf '  - %s\n' "${SECRETS[@]}"
 echo ""
-echo "Next: create a Google OAuth Desktop/Web client with YouTube Data API access,"
-echo "authorize the actual MyUSA YouTube channel, then add the client ID, client secret,"
-echo "and refresh token as Secret Manager secret versions. Never put them in GitHub."
+echo "The setup key and signed-state secret were generated automatically."
+echo "The OAuth client ID/secret and refresh token are intentionally not printed or stored in GitHub."
