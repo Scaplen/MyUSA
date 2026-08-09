@@ -2,6 +2,12 @@ name: Bootstrap MyUSA YouTube Auth Helper
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/youtube-publisher
+    paths:
+      - 'youtube_auth_helper/**'
+      - '.github/workflows/bootstrap-myusa-youtube-auth-helper.yml'
 
 permissions:
   contents: read
