@@ -73,7 +73,13 @@ def _flow(state=None):
             "redirect_uris": [REDIRECT_URI],
         }
     }
-    return Flow.from_client_config(config, scopes=SCOPES, state=state, redirect_uri=REDIRECT_URI)
+    return Flow.from_client_config(
+        config,
+        scopes=SCOPES,
+        state=state,
+        redirect_uri=REDIRECT_URI,
+        autogenerate_code_verifier=False,
+    )
 
 
 def _verify_channel(creds: Credentials) -> dict:
@@ -148,8 +154,6 @@ def callback():
         "The refresh token was stored directly in Google Secret Manager. You may close this page."
     ), 200
 
-
-# Redeploy marker: refresh latest Web OAuth client secret from Secret Manager.
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
