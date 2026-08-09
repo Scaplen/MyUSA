@@ -2,6 +2,12 @@ name: Deploy MyUSA YouTube Auth Helper
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/youtube-publisher
+    paths:
+      - '.github/workflows/deploy-myusa-youtube-auth-helper.yml'
+      - 'youtube_auth_helper/**'
 
 permissions:
   contents: read
