@@ -38,6 +38,7 @@ jobs:
 
       - name: Deploy authorization helper
         run: |
+          # Redeploy so Cloud Run resolves the newest Secret Manager versions.
           gcloud run deploy myusa-youtube-auth \
             --project=optimum-sound-505003-d3 \
             --source=youtube_auth_helper \
