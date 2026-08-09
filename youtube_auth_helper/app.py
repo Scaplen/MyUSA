@@ -129,7 +129,12 @@ def callback():
     if not _valid_state(state):
         abort(403)
     flow = _flow(state=state)
-    flow.fetch_token(authorization_response=request.url)
+    # Cloud Run terminates TLS before forwarding to Flask, so request.url may
+    # appear as http:// internally. Rebuild the authorization response from
+    # the configured public HTTPS callback URI plus Google's query string.
+    query = request.query_string.decode("utf-8")
+    authorization_response = REDIRECT_URI + (f"?{query}" if query else "")
+    flow.fetch_token(authorization_response=authorization_response)
     creds = flow.credentials
     if not creds.refresh_token:
         raise RuntimeError("Google did not return a refresh token. Revoke prior grant and retry with consent.")
