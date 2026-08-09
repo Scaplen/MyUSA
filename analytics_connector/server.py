@@ -8,6 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 PROPERTY_ID = os.getenv("MYUSA_GA4_PROPERTY_ID", "527458725")
 PROPERTY = f"properties/{PROPERTY_ID}"
+PORT = int(os.getenv("PORT", "8080"))
 
 mcp = FastMCP("MyUSA Google Analytics")
 data_client = BetaAnalyticsDataClient()
@@ -129,4 +130,9 @@ def get_events(days: int = 7, limit: int = 50) -> list[dict[str, Any]]:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    mcp.run(
+        transport="streamable-http",
+        host="0.0.0.0",
+        port=PORT,
+        streamable_http_path="/mcp",
+    )
