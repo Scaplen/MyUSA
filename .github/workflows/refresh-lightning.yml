@@ -1,6 +1,10 @@
 name: Refresh NOAA GOES lightning feed
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/refresh-lightning.yml
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
