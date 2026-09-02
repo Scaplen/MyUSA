@@ -1,0 +1,48 @@
+name: Refresh NOAA GOES lightning feed
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: noaa-goes-lightning-feed
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out MyUSA tools
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tools/lightning_system/requirements.txt
+
+      - name: Install NOAA GLM reader
+        run: python -m pip install -r tools/lightning_system/requirements.txt
+
+      - name: Build recent satellite-lightning feed
+        run: python tools/lightning_system/glm_to_geojson.py --minutes 10 --output /tmp/latest-lightning.geojson
+
+      - name: Publish the compact feed
+        run: |
+          git config user.name "MyUSA Lightning Worker"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin lightning-data
+          git switch lightning-data
+          mkdir -p data
+          cp /tmp/latest-lightning.geojson data/latest-lightning.geojson
+          git add data/latest-lightning.geojson
+          git commit --amend --no-edit
+          git push --force-with-lease origin lightning-data
