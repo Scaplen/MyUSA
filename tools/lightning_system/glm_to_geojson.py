@@ -100,16 +100,31 @@ def collect(minutes):
     s3 = boto3.client("s3", config=Config(signature_version=UNSIGNED))
     cutoff = utcnow() - dt.timedelta(minutes=minutes)
     features = []
+    satellites = {}
 
     with tempfile.TemporaryDirectory() as td:
         for sat, bucket in SATELLITES.items():
-            for key in list_recent_keys(s3, bucket, minutes):
+            keys = list_recent_keys(s3, bucket, minutes)
+            satellite_features = []
+            successful_files = 0
+            for key in keys:
                 local = os.path.join(td, f"{sat}-{os.path.basename(key)}")
                 try:
                     s3.download_file(bucket, key, local)
-                    features.extend(parse_file(local, sat, cutoff))
+                    satellite_features.extend(parse_file(local, sat, cutoff))
+                    successful_files += 1
                 except Exception as exc:
                     print(f"warning: failed {bucket}/{key}: {exc}")
+            features.extend(satellite_features)
+            newest = max(
+                (feature["properties"]["observed"] for feature in satellite_features),
+                default=None,
+            )
+            satellites[sat] = {
+                "available": successful_files > 0,
+                "objectCount": successful_files,
+                "newestObservation": newest,
+            }
 
     # Lightweight overlap dedupe: round location/time to avoid double-counting
     # very similar observations from East/West coverage overlap.
@@ -122,7 +137,7 @@ def collect(minutes):
 
     out = list(unique.values())
     out.sort(key=lambda f: f["properties"]["observed"])
-    return out
+    return out, satellites
 
 
 def main():
@@ -131,12 +146,14 @@ def main():
     ap.add_argument("--output", default="latest-lightning.geojson")
     args = ap.parse_args()
 
-    features = collect(args.minutes)
+    features, satellites = collect(args.minutes)
     payload = {
         "type": "FeatureCollection",
         "generated": utcnow().isoformat().replace("+00:00", "Z"),
         "windowMinutes": args.minutes,
         "source": "NOAA GOES GLM Level-2 LCFA",
+        "available": any(item["available"] for item in satellites.values()),
+        "satellites": satellites,
         "features": features,
     }
     Path(args.output).write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
