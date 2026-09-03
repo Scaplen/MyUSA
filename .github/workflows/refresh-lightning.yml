@@ -51,3 +51,7 @@ jobs:
           git add data/latest-lightning.geojson
           git commit --amend --no-edit
           git push --force-with-lease origin lightning-data
+
+      - name: Check saved locations for new NWS warnings
+        if: always()
+        run: curl --fail --silent --show-error --max-time 60 -X POST https://myusa.us/api/push/run
