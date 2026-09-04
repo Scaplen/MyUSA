@@ -7,7 +7,9 @@ on:
       - .github/workflows/refresh-lightning.yml
       - tools/lightning_system/**
   schedule:
-    - cron: "2-59/5 * * * *"
+    # Two staggered schedules reduce long gaps when GitHub delays one queue.
+    - cron: "3-53/10 * * * *"
+    - cron: "8-58/10 * * * *"
   workflow_dispatch:
 
 permissions:
