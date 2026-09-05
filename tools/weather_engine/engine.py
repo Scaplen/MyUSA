@@ -5,6 +5,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from health import check_nws_health, classify_engine
 
 API_ROOT = "https://api.weather.gov"
 USER_AGENT = "MyUSA.us weather engine (https://myusa.us)"
@@ -64,7 +65,6 @@ class WeatherEngine:
         lat = round(float(lat), 4)
         lon = round(float(lon), 4)
         key = f"point:{lat},{lon}"
-        # Grid mappings change rarely, but NWS recommends periodically rechecking them.
         return self._fetch_json(f"{API_ROOT}/points/{lat},{lon}", key, 86400)
 
     def forecast_bundle(self, lat, lon):
@@ -83,6 +83,17 @@ class WeatherEngine:
             60,
         )
 
+        engine_meta = {
+            "source": "National Weather Service / api.weather.gov",
+            "point": point_meta,
+            "forecast": forecast_meta,
+            "hourly": hourly_meta,
+            "alerts": alerts_meta,
+            "usedFallback": any(m.get("stale") for m in (point_meta, forecast_meta, hourly_meta, alerts_meta)),
+        }
+        nws_health = check_nws_health(timeout=min(self.timeout, 5))
+        engine_meta["health"] = classify_engine(engine_meta, nws_health)
+
         return {
             "location": {
                 "latitude": round(float(lat), 4),
@@ -96,14 +107,7 @@ class WeatherEngine:
             "forecast": forecast,
             "hourly": hourly,
             "alerts": alerts,
-            "engine": {
-                "source": "National Weather Service / api.weather.gov",
-                "point": point_meta,
-                "forecast": forecast_meta,
-                "hourly": hourly_meta,
-                "alerts": alerts_meta,
-                "usedFallback": any(m.get("stale") for m in (point_meta, forecast_meta, hourly_meta, alerts_meta)),
-            },
+            "engine": engine_meta,
         }
 
 
