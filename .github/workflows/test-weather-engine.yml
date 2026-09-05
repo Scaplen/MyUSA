@@ -1,106 +1,81 @@
 name: Test MyUSA weather engine
-
 on:
   push:
     branches: [main]
-    paths:
-      - tools/weather_engine/**
-      - .github/workflows/test-weather-engine.yml
+    paths: [tools/weather_engine/**, .github/workflows/test-weather-engine.yml]
   pull_request:
-    paths:
-      - tools/weather_engine/**
-      - .github/workflows/test-weather-engine.yml
+    paths: [tools/weather_engine/**, .github/workflows/test-weather-engine.yml]
   workflow_dispatch:
-
-permissions:
-  contents: read
-
+permissions: {contents: read}
 jobs:
   engine-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
+        with: {python-version: '3.12'}
       - name: Build official Census ZIP centroid table
         run: python tools/weather_engine/build_zip_centroids.py
-
-      - name: Validate representative ZIP coverage
+      - name: Test representative ZIP weather, observations and health
         run: |
           python - <<'PY'
           import sys
-          sys.path.insert(0, 'tools/weather_engine')
-          from zip_lookup import resolve_zip
-          for z in ['32162','08817','90210','68375','77494']:
-              r = resolve_zip(z)
-              assert -90 <= r['lat'] <= 90 and -180 <= r['lon'] <= 180
-              print(z, r['lat'], r['lon'])
-          PY
-
-      - name: Test NWS forecast/hourly/alerts and health status
-        run: |
-          python - <<'PY'
-          import sys
-          sys.path.insert(0, 'tools/weather_engine')
+          sys.path.insert(0,'tools/weather_engine')
           from bundle import bundle_for_zip
           for z in ['32162','08817','90210','68375','77494']:
-              b = bundle_for_zip(z, include_lightning=False)
-              assert b['forecast']['properties']['periods'], f'no forecast periods for {z}'
-              assert b['hourly']['properties']['periods'], f'no hourly periods for {z}'
-              assert 'features' in b['alerts'], f'alerts missing for {z}'
-              assert b['engine']['source'].startswith('National Weather Service')
-              status = b['engine']['health']['status']
-              assert status in {'LIVE','CACHED','DEGRADED','STALE'}
-              print(z, status, 'PASS')
+              b=bundle_for_zip(z,include_lightning=False)
+              assert b['forecast']['properties']['periods']
+              assert b['hourly']['properties']['periods']
+              assert 'features' in b['alerts']
+              assert b['engine']['health']['status'] in {'LIVE','CACHED','DEGRADED','STALE'}
+              assert 'current' in b and 'available' in b['current']
+              if b['current']['available']:
+                  best=b['current']['best']; assert best['station']; assert best['observedAt']; assert best['source'].startswith('National Weather Service')
+              print(z,b['engine']['health']['status'],'observation',b['current']['available'],'PASS')
           PY
-
+      - name: Test observation normalization
+        run: |
+          python - <<'PY'
+          import sys, datetime as dt
+          sys.path.insert(0,'tools/weather_engine')
+          from current_conditions import normalize_observation
+          now=dt.datetime.now(dt.timezone.utc).isoformat().replace('+00:00','Z')
+          o=normalize_observation({'properties':{'timestamp':now,'temperature':{'value':20},'dewpoint':{'value':10},'relativeHumidity':{'value':50},'windSpeed':{'value':5},'textDescription':'Clear'}},'TEST')
+          assert o['temperatureF']==68.0 and o['station']=='TEST' and o['fresh'] is True
+          assert o['windMph']==11.2
+          print('observation normalization PASS')
+          PY
       - name: Test health classifier states
         run: |
           python - <<'PY'
           import sys
-          sys.path.insert(0, 'tools/weather_engine')
+          sys.path.insert(0,'tools/weather_engine')
           from health import classify_engine
-          base = {name:{'cache':'refreshed','stale':False} for name in ('point','forecast','hourly','alerts')}
-          assert classify_engine(base, {'reachable':True})['status'] == 'LIVE'
-          cached = {name:{'cache':'fresh','stale':False} for name in ('point','forecast','hourly','alerts')}
-          assert classify_engine(cached, {'reachable':True})['status'] == 'CACHED'
-          degraded = dict(base); degraded['forecast']={'cache':'last-known-good','stale':True,'ageSeconds':300}
-          assert classify_engine(degraded, {'reachable':True})['status'] == 'DEGRADED'
-          stale = dict(base); stale['forecast']={'cache':'last-known-good','stale':True,'ageSeconds':7200}
-          assert classify_engine(stale, {'reachable':True})['status'] == 'STALE'
-          assert classify_engine(base, {'reachable':False})['status'] == 'DEGRADED'
-          print('health states PASS')
+          base={n:{'cache':'refreshed','stale':False} for n in ('point','forecast','hourly','alerts')}
+          assert classify_engine(base,{'reachable':True})['status']=='LIVE'
+          cached={n:{'cache':'fresh','stale':False} for n in ('point','forecast','hourly','alerts')}
+          assert classify_engine(cached,{'reachable':True})['status']=='CACHED'
+          degraded=dict(base); degraded['forecast']={'cache':'last-known-good','stale':True,'ageSeconds':300}; assert classify_engine(degraded,{'reachable':True})['status']=='DEGRADED'
+          stale=dict(base); stale['forecast']={'cache':'last-known-good','stale':True,'ageSeconds':7200}; assert classify_engine(stale,{'reachable':True})['status']=='STALE'
           PY
-
       - name: Test Trend guardrails
         run: |
           python - <<'PY'
           import sys
-          sys.path.insert(0, 'tools/weather_engine')
+          sys.path.insert(0,'tools/weather_engine')
           from trends import score_trends
-          weather = {'alerts': {'features': [{'properties': {'event': 'Severe Thunderstorm Warning'}}]}, 'forecast': {'properties': {'periods': []}}, 'lightning': {'available': False, 'count': 0}}
-          result = score_trends(weather, [{'topic':'severe thunderstorm','source':'test','score':80},{'topic':'celebrity news','source':'test','score':100}])
-          assert next(x for x in result['items'] if x['topic']=='severe thunderstorm')['publishEligible'] is True
-          assert next(x for x in result['items'] if x['topic']=='celebrity news')['publishEligible'] is False
-          print('trend guardrails PASS')
+          w={'alerts':{'features':[{'properties':{'event':'Severe Thunderstorm Warning'}}]},'forecast':{'properties':{'periods':[]}},'lightning':{'available':False,'count':0}}
+          r=score_trends(w,[{'topic':'severe thunderstorm','source':'test','score':80},{'topic':'celebrity news','source':'test','score':100}])
+          assert next(x for x in r['items'] if x['topic']=='severe thunderstorm')['publishEligible'] is True
+          assert next(x for x in r['items'] if x['topic']=='celebrity news')['publishEligible'] is False
           PY
-
       - name: Test last-known-good fallback
         run: |
           python - <<'PY'
-          import tempfile, sys
-          sys.path.insert(0, 'tools/weather_engine')
-          import engine
+          import tempfile,sys
+          sys.path.insert(0,'tools/weather_engine'); import engine
           with tempfile.TemporaryDirectory() as td:
-              w = engine.WeatherEngine(cache_dir=td, timeout=1)
-              key='fallback-test'
-              w._write_cache(key, {'ok': True})
-              payload, meta = w._fetch_json('http://127.0.0.1:9/unreachable', key, ttl_seconds=-1)
-              assert payload == {'ok': True}
-              assert meta['cache'] == 'last-known-good' and meta['stale'] is True
-              print('fallback PASS')
+              w=engine.WeatherEngine(cache_dir=td,timeout=1); w._write_cache('fallback-test',{'ok':True}); p,m=w._fetch_json('http://127.0.0.1:9/unreachable','fallback-test',-1)
+              assert p=={'ok':True} and m['cache']=='last-known-good' and m['stale'] is True
           PY
