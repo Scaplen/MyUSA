@@ -1,0 +1,92 @@
+name: Test MyUSA weather engine
+
+on:
+  pull_request:
+    paths:
+      - tools/weather_engine/**
+      - .github/workflows/test-weather-engine.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  engine-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build official Census ZIP centroid table
+        run: python tools/weather_engine/build_zip_centroids.py
+
+      - name: Validate representative ZIP coverage
+        run: |
+          python - <<'PY'
+          import json, sys
+          sys.path.insert(0, 'tools/weather_engine')
+          from zip_lookup import resolve_zip
+          zips = ['32162','08817','90210','68375','77494']
+          for z in zips:
+              r = resolve_zip(z)
+              assert -90 <= r['lat'] <= 90 and -180 <= r['lon'] <= 180
+              print(z, r['lat'], r['lon'])
+          PY
+
+      - name: Test NWS forecast/hourly/alerts for representative ZIPs
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, 'tools/weather_engine')
+          from bundle import bundle_for_zip
+          for z in ['32162','08817','90210','68375','77494']:
+              b = bundle_for_zip(z, include_lightning=False)
+              assert b['forecast']['properties']['periods'], f'no forecast periods for {z}'
+              assert b['hourly']['properties']['periods'], f'no hourly periods for {z}'
+              assert 'features' in b['alerts'], f'alerts missing for {z}'
+              assert b['engine']['source'].startswith('National Weather Service')
+              print(z, b['location'].get('city'), b['location'].get('state'), 'PASS')
+          PY
+
+      - name: Test Trend guardrails
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, 'tools/weather_engine')
+          from trends import score_trends
+          weather = {
+              'alerts': {'features': [{'properties': {'event': 'Severe Thunderstorm Warning'}}]},
+              'forecast': {'properties': {'periods': []}},
+              'lightning': {'available': False, 'count': 0},
+          }
+          result = score_trends(weather, [
+              {'topic':'severe thunderstorm','source':'test','score':80},
+              {'topic':'celebrity news','source':'test','score':100},
+          ])
+          severe = next(x for x in result['items'] if x['topic']=='severe thunderstorm')
+          unrelated = next(x for x in result['items'] if x['topic']=='celebrity news')
+          assert severe['publishEligible'] is True
+          assert unrelated['publishEligible'] is False
+          print('trend guardrails PASS')
+          PY
+
+      - name: Test last-known-good fallback
+        run: |
+          python - <<'PY'
+          import json, tempfile, time, sys
+          from pathlib import Path
+          sys.path.insert(0, 'tools/weather_engine')
+          import engine
+          with tempfile.TemporaryDirectory() as td:
+              w = engine.WeatherEngine(cache_dir=td, timeout=1)
+              key='fallback-test'
+              w._write_cache(key, {'ok': True})
+              payload, meta = w._fetch_json('http://127.0.0.1:9/unreachable', key, ttl_seconds=-1)
+              assert payload == {'ok': True}
+              assert meta['cache'] == 'last-known-good' and meta['stale'] is True
+              print('fallback PASS')
+          PY
