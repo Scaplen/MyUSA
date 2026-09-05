@@ -40,7 +40,39 @@ jobs:
       - name: Build recent satellite-lightning feed
         run: python tools/lightning_system/glm_to_geojson.py --minutes 10 --output /tmp/latest-lightning.geojson
 
+      - name: Validate generated feed
+        id: validate_feed
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('/tmp/latest-lightning.geojson')
+          payload = json.loads(path.read_text(encoding='utf-8'))
+
+          if payload.get('type') != 'FeatureCollection':
+              raise SystemExit('invalid feed: expected FeatureCollection')
+          if not isinstance(payload.get('features'), list):
+              raise SystemExit('invalid feed: features must be a list')
+
+          available = bool(payload.get('available'))
+          feature_count = len(payload['features'])
+          print(f'available={available} feature_count={feature_count}')
+
+          with open(Path(__import__('os').environ['GITHUB_OUTPUT']), 'a', encoding='utf-8') as fh:
+              fh.write(f'available={str(available).lower()}\n')
+              fh.write(f'feature_count={feature_count}\n')
+          PY
+
+      - name: Preserve last-known-good feed when NOAA is unavailable
+        if: steps.validate_feed.outputs.available != 'true'
+        run: |
+          echo "NOAA GOES GLM was unavailable during this refresh."
+          echo "Keeping the existing lightning-data feed instead of publishing a false empty feed."
+
       - name: Publish the compact feed
+        if: steps.validate_feed.outputs.available == 'true'
         run: |
           git config user.name "MyUSA Lightning Worker"
           git config user.email "actions@users.noreply.github.com"
