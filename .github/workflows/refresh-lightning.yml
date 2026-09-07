@@ -7,7 +7,9 @@ on:
       - .github/workflows/refresh-lightning.yml
       - tools/lightning_system/**
   schedule:
-    - cron: "3-53/10 * * * *"
+    # This starts a watchdog run. Each run keeps refreshing for about five hours,
+    # so GitHub schedule delays do not leave the public feed stale.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +22,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 330
     steps:
       - name: Check out MyUSA tools
         uses: actions/checkout@v4
@@ -37,20 +39,60 @@ jobs:
       - name: Install NOAA GLM reader
         run: python -m pip install -r tools/lightning_system/requirements.txt
 
-      - name: Build recent satellite-lightning feed
-        run: python tools/lightning_system/glm_to_geojson.py --minutes 10 --output /tmp/latest-lightning.geojson
-
-      - name: Publish the compact feed
+      - name: Prepare lightning-data publisher
         run: |
+          set -euo pipefail
           git config user.name "MyUSA Lightning Worker"
           git config user.email "actions@users.noreply.github.com"
           git fetch origin lightning-data
-          git switch lightning-data
-          mkdir -p data
-          cp /tmp/latest-lightning.geojson data/latest-lightning.geojson
-          git add data/latest-lightning.geojson
-          git commit --amend --no-edit
-          git push --force-with-lease origin lightning-data
+          git worktree add --detach /tmp/lightning-data origin/lightning-data
+
+      - name: Keep the public feed fresh
+        run: |
+          set -u
+          successes=0
+
+          publish_feed() {
+            git -C /tmp/lightning-data fetch origin lightning-data
+            git -C /tmp/lightning-data reset --hard origin/lightning-data
+            mkdir -p /tmp/lightning-data/data
+            cp /tmp/latest-lightning.geojson /tmp/lightning-data/data/latest-lightning.geojson
+            git -C /tmp/lightning-data add data/latest-lightning.geojson
+            git -C /tmp/lightning-data commit --amend --no-edit
+            git -C /tmp/lightning-data push --force-with-lease origin HEAD:lightning-data
+          }
+
+          for iteration in $(seq 1 60); do
+            echo "Lightning refresh $iteration of 60"
+
+            if python tools/lightning_system/glm_to_geojson.py --minutes 10 --output /tmp/latest-lightning.geojson; then
+              published=false
+              for attempt in 1 2 3; do
+                if publish_feed; then
+                  published=true
+                  successes=$((successes + 1))
+                  break
+                fi
+                echo "Publish attempt $attempt failed; retrying against the newest branch head."
+                sleep 10
+              done
+
+              if [ "$published" != "true" ]; then
+                echo "::warning::The feed was built but could not be published on this cycle."
+              fi
+            else
+              echo "::warning::NOAA did not return a complete feed on this cycle; the worker will retry."
+            fi
+
+            if [ "$iteration" -lt 60 ]; then
+              sleep 300
+            fi
+          done
+
+          if [ "$successes" -eq 0 ]; then
+            echo "::error::No lightning refresh succeeded during this worker run."
+            exit 1
+          fi
 
       - name: Check saved locations for new NWS warnings
         if: always()
