@@ -1,4 +1,4 @@
-name: Backup NOAA GOES lightning refresh
+name: Rescue stale NOAA GOES lightning feed
 
 on:
   push:
@@ -6,27 +6,60 @@ on:
     paths:
       - .github/workflows/refresh-lightning-backup.yml
   schedule:
-    - cron: "8-58/10 * * * *"
+    # Independent watchdog. It writes only when the published feed is stale.
+    - cron: "47 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: noaa-goes-lightning-feed
+  group: noaa-goes-lightning-rescue
   cancel-in-progress: false
 
 jobs:
-  refresh:
+  rescue:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
+      - name: Check whether the feed needs rescue
+        id: freshness
+        env:
+          FEED_URL: https://raw.githubusercontent.com/Scaplen/MyUSA/lightning-data/data/latest-lightning.geojson
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from datetime import datetime, timezone
+
+          needs_refresh = True
+          try:
+              request = urllib.request.Request(
+                  os.environ["FEED_URL"] + "?rescue=1",
+                  headers={"Cache-Control": "no-cache", "User-Agent": "MyUSA lightning rescue"},
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  payload = json.load(response)
+              generated = datetime.fromisoformat(str(payload["generated"]).replace("Z", "+00:00"))
+              age_seconds = (datetime.now(timezone.utc) - generated).total_seconds()
+              needs_refresh = age_seconds > 20 * 60 or age_seconds < -5 * 60
+              print(f"Published feed age: {age_seconds / 60:.1f} minutes")
+          except Exception as error:
+              print(f"Freshness check failed: {error}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"needed={'true' if needs_refresh else 'false'}\n")
+          PY
+
       - name: Check out MyUSA tools
+        if: steps.freshness.outputs.needed == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Python
+        if: steps.freshness.outputs.needed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -34,23 +67,32 @@ jobs:
           cache-dependency-path: tools/lightning_system/requirements.txt
 
       - name: Install NOAA GLM reader
+        if: steps.freshness.outputs.needed == 'true'
         run: python -m pip install -r tools/lightning_system/requirements.txt
 
-      - name: Build recent satellite-lightning feed
-        run: python tools/lightning_system/glm_to_geojson.py --minutes 10 --output /tmp/latest-lightning.geojson
-
-      - name: Publish the compact feed
+      - name: Rebuild and publish the feed
+        if: steps.freshness.outputs.needed == 'true'
         run: |
-          git config user.name "MyUSA Lightning Worker"
+          set -euo pipefail
+          python tools/lightning_system/glm_to_geojson.py --minutes 10 --output /tmp/latest-lightning.geojson
+          git config user.name "MyUSA Lightning Rescue"
           git config user.email "actions@users.noreply.github.com"
-          git fetch origin lightning-data
-          git switch lightning-data
-          mkdir -p data
-          cp /tmp/latest-lightning.geojson data/latest-lightning.geojson
-          git add data/latest-lightning.geojson
-          git commit --amend --no-edit
-          git push --force-with-lease origin lightning-data
 
-      - name: Check saved locations for new NWS warnings
-        if: always()
-        run: curl --fail --silent --show-error --max-time 60 -X POST https://myusa.us/api/push/run
+          for attempt in 1 2 3; do
+            git fetch origin lightning-data
+            git switch --detach --force origin/lightning-data
+            mkdir -p data
+            cp /tmp/latest-lightning.geojson data/latest-lightning.geojson
+            git add data/latest-lightning.geojson
+            git commit --amend --no-edit
+
+            if git push --force-with-lease origin HEAD:lightning-data; then
+              exit 0
+            fi
+
+            echo "Rescue publish attempt $attempt failed; retrying."
+            sleep 10
+          done
+
+          echo "::error::The rescue feed could not be published after three attempts."
+          exit 1
