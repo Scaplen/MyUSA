@@ -7,6 +7,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 
+FRESH_OBSERVATION_MINUTES = 30
+
+
 def _value(metric: Any):
     if not isinstance(metric, dict):
         return None
@@ -44,7 +47,7 @@ def normalize_observation(payload: dict[str, Any], station_id: str | None = None
         "station": station_id,
         "observedAt": timestamp,
         "ageMinutes": age_minutes,
-        "fresh": age_minutes is not None and age_minutes <= 30,
+        "fresh": age_minutes is not None and age_minutes <= FRESH_OBSERVATION_MINUTES,
         "temperatureF": c_to_f(temp_c),
         "dewpointF": c_to_f(dew_c),
         "humidityPercent": None if humidity is None else round(humidity, 1),
@@ -112,14 +115,25 @@ def current_conditions(engine, point: dict[str, Any]) -> dict[str, Any]:
         if item.get("ageMinutes") is not None
         else 999999
     )
-    best = candidates[0] if candidates else None
+    fresh_candidates = [item for item in candidates if item.get("fresh")]
+    best = fresh_candidates[0] if fresh_candidates else None
+    stale_best = candidates[0] if candidates and not best else None
 
-    return {
+    result = {
         "available": best is not None,
         "best": best,
         "stationsChecked": len(station_urls),
-        "freshStations": sum(1 for item in candidates if item.get("fresh")),
-        "alternates": candidates[1:3],
+        "freshStations": len(fresh_candidates),
+        "alternates": fresh_candidates[1:3],
         "stationListCache": stations_meta,
         "source": "National Weather Service observation stations",
+        "freshnessLimitMinutes": FRESH_OBSERVATION_MINUTES,
     }
+
+    if stale_best is not None:
+        # Preserve stale telemetry for diagnostics only. Consumers must never use
+        # this value as a current observation when available is False.
+        result["reason"] = "No nearby NWS station has a fresh observation"
+        result["staleBest"] = stale_best
+
+    return result
