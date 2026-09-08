@@ -31,20 +31,34 @@ jobs:
               assert b['engine']['health']['status'] in {'LIVE','CACHED','DEGRADED','STALE'}
               assert 'current' in b and 'available' in b['current']
               if b['current']['available']:
-                  best=b['current']['best']; assert best['station']; assert best['observedAt']; assert best['source'].startswith('National Weather Service')
+                  best=b['current']['best']; assert best['station']; assert best['observedAt']; assert best['source'].startswith('National Weather Service'); assert best['fresh'] is True
               print(z,b['engine']['health']['status'],'observation',b['current']['available'],'PASS')
           PY
-      - name: Test observation normalization
+      - name: Test observation normalization and stale rejection
         run: |
           python - <<'PY'
           import sys, datetime as dt
           sys.path.insert(0,'tools/weather_engine')
-          from current_conditions import normalize_observation
+          from current_conditions import normalize_observation, current_conditions
           now=dt.datetime.now(dt.timezone.utc).isoformat().replace('+00:00','Z')
+          old=(dt.datetime.now(dt.timezone.utc)-dt.timedelta(hours=2)).isoformat().replace('+00:00','Z')
           o=normalize_observation({'properties':{'timestamp':now,'temperature':{'value':20},'dewpoint':{'value':10},'relativeHumidity':{'value':50},'windSpeed':{'value':5},'textDescription':'Clear'}},'TEST')
           assert o['temperatureF']==68.0 and o['station']=='TEST' and o['fresh'] is True
           assert o['windMph']==11.2
-          print('observation normalization PASS')
+          stale=normalize_observation({'properties':{'timestamp':old,'temperature':{'value':20}}},'OLD')
+          assert stale['fresh'] is False and stale['ageMinutes'] >= 119
+
+          class FakeEngine:
+              def _fetch_json(self,url,key,ttl,max_stale_seconds=None):
+                  if key.startswith('stations:'):
+                      return {'features':[{'id':'https://api.weather.gov/stations/OLD'}]}, {'cache':'fresh','stale':False}
+                  return {'properties':{'timestamp':old,'temperature':{'value':20}}}, {'cache':'fresh','stale':False}
+          point={'properties':{'observationStations':'https://api.weather.gov/gridpoints/TEST/stations'}}
+          current=current_conditions(FakeEngine(),point)
+          assert current['available'] is False
+          assert current['best'] is None
+          assert current['staleBest']['station']=='OLD'
+          print('observation freshness guard PASS')
           PY
       - name: Test health classifier states
         run: |
