@@ -1,0 +1,32 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - us-east1-docker.pkg.dev/$PROJECT_ID/myusa-connectors/myusa-google-connector:$COMMIT_SHA
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - us-east1-docker.pkg.dev/$PROJECT_ID/myusa-connectors/myusa-google-connector:$COMMIT_SHA
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - myusa-google-connector
+      - --image=us-east1-docker.pkg.dev/$PROJECT_ID/myusa-connectors/myusa-google-connector:$COMMIT_SHA
+      - --region=us-east1
+      - --platform=managed
+      - --service-account=myusa-google-connector@optimum-sound-505003-d3.iam.gserviceaccount.com
+      - --no-allow-unauthenticated
+      - --min-instances=0
+      - --max-instances=1
+      - --cpu=1
+      - --memory=512Mi
+      - --concurrency=20
+      - --set-env-vars=MYUSA_GA4_PROPERTY_ID=527458725,MYUSA_SEARCH_CONSOLE_SITE=https://myusa.us/
+images:
+  - us-east1-docker.pkg.dev/$PROJECT_ID/myusa-connectors/myusa-google-connector:$COMMIT_SHA
+options:
+  logging: CLOUD_LOGGING_ONLY
